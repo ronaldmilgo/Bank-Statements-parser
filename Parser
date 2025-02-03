@@ -1,0 +1,68 @@
+# Further refining date validation to ensure reasonable year ranges
+def extract_transactions_with_date_filter(pdf_path):
+    transactions = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                lines = text.split("\n")
+                for line in lines:
+                    parts = re.split(r'\s{2,}', line)  # Splitting by multiple spaces to detect columns
+                    if len(parts) >= 3:  # Ensuring it has enough components
+                        date_candidate = parts[0].strip()
+
+                        # Validate if the first part is a date within a reasonable range
+                        try:
+                            parsed_date = parser.parse(date_candidate, dayfirst=True, fuzzy=False)
+                            if parsed_date.year < 2000 or parsed_date.year > 2050:  # Filtering out unrealistic years
+                                continue
+                        except (ValueError, TypeError, OverflowError):
+                            continue  # Skip non-date rows
+
+                        description = parts[1].strip()
+                        debit = None
+                        credit = None
+
+                        # Cleaning numeric values and checking for valid numbers
+                        for part in parts[2:]:
+                            clean_part = re.sub(r"[^\d.]", "", part)  # Remove non-numeric characters except dots
+                            if clean_part.replace(".", "").isdigit():  # Checking if it's a valid number
+                                try:
+                                    amount = float(clean_part)
+                                    if debit is None:
+                                        debit = amount
+                                    else:
+                                        credit = amount
+                                except ValueError:
+                                    continue
+
+                        transactions.append((parsed_date.strftime('%Y-%m-%d'), description, debit, credit))
+    return transactions
+
+# Extract transactions again with realistic date filtering
+filtered_transactions = []
+for pdf in pdf_files:
+    filtered_transactions.extend(extract_transactions_with_date_filter(pdf))
+
+# Process extracted transactions
+processed_summary_filtered = process_transactions(filtered_transactions)
+
+# Convert processed summary into a DataFrame for visualization
+filtered_summary_data = []
+for month, data in processed_summary_filtered.items():
+    row = {
+        "Month": month,
+        "Total Deposits": data['total_deposits'],
+        "Total Withdrawals": data['total_withdrawals'],
+        "Net Balance": data['total_deposits'] - data['total_withdrawals'],
+        "Loans": data['expenses'].get("Loans", 0),
+        "Salaries": data['expenses'].get("Salaries", 0),
+        "Rent": data['expenses'].get("Rent", 0),
+        "Utilities": data['expenses'].get("Utilities", 0),
+        "Other Expenses": data['expenses'].get("Other Expenses", 0),
+    }
+    filtered_summary_data.append(row)
+
+# Create a DataFrame and display
+final_filtered_summary_df = pd.DataFrame(filtered_summary_data)
+tools.display_dataframe_to_user(name="Final Corrected Financial Summary", dataframe=final_filtered_summary_df)
